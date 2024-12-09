@@ -21,7 +21,7 @@ scikit-learn = "1.5.2"
 ruff = "0.8.1"
 ipykernel = "6.29.5"
 pre-commit = "3.8.0"
-nbdev = "2.3.32"
+nbdev = "2.3.34"
 
 [tool.ruff]
 extend-include = ["*.ipynb"]
