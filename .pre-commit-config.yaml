@@ -1,6 +1,6 @@
 repos:
 - repo: https://github.com/fastai/nbdev
-  rev: 2.3.33
+  rev: 2.3.34
   hooks:
   - id: nbdev_clean
 - repo: https://github.com/astral-sh/ruff-pre-commit
