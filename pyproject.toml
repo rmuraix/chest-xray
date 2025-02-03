@@ -20,7 +20,7 @@ scikit-learn = "1.5.2"
 [tool.poetry.group.dev.dependencies]
 ruff = "0.9.4"
 ipykernel = "6.29.5"
-pre-commit = "4.0.1"
+pre-commit = "4.1.0"
 nbdev = "2.3.34"
 
 [tool.ruff]
