@@ -1,25 +1,29 @@
 {
 	"name": "python3-gpu",
 	"build": {
-        "dockerfile": "./Dockerfile"
-    },
-	"runArgs": ["--gpus", "all","--shm-size","16g"],
+		"dockerfile": "./Dockerfile"
+	},
+	"runArgs": [
+		"--gpus",
+		"all",
+		"--shm-size",
+		"16g"
+	],
 	"containerEnv": {
 		"TZ": "Asia/Tokyo"
 	},
 	"features": {
-		"ghcr.io/devcontainers-contrib/features/poetry:2": {},
 		"ghcr.io/devcontainers/features/common-utils:2": {
-            "installZsh": false,
-            "installOhMyZsh": false,
-            "installOhMyZshConfig": false,
-            "upgradePackages": false,
-            "username": "vscode",
-            "userUid": "automatic",
-            "userGid": "automatic"
-        }
+			"installZsh": false,
+			"installOhMyZsh": false,
+			"installOhMyZshConfig": false,
+			"upgradePackages": false,
+			"username": "vscode",
+			"userUid": "automatic",
+			"userGid": "automatic"
+		}
 	},
-	"postStartCommand": "poetry install && poetry run pre-commit install",
+	"postStartCommand": "uv sync && uv run pre-commit install",
 	"remoteUser": "vscode",
 	"customizations": {
 		"vscode": {
@@ -27,7 +31,8 @@
 				"ms-toolsai.jupyter",
 				"charliermarsh.ruff",
 				"tamasfe.even-better-toml",
-				"ms-python.python"
+				"ms-python.python",
+				"ms-python.mypy-type-checker"
 			]
 		}
 	}

@@ -1,31 +1,39 @@
-[tool.poetry]
+[project]
 name = "template-dl-devcontainer"
 version = "0.1.0"
-package-mode = false
-description = "Template repo using devcontainer"
-authors = ["rmuraix <35632215+rmuraix@users.noreply.github.com>"]
-license = "MIT"
+description = "Add your description here"
 readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "matplotlib>=3.10.0",
+    "numpy>=2.2.2",
+    "pandas>=2.2.3",
+    "scikit-learn>=1.6.1",
+    "seaborn>=0.13.2",
+    "torch>=2.6.0",
+    "torchvision>=0.21.0",
+    "wandb>=0.19.6",
+]
 
-[tool.poetry.dependencies]
-python = "~3.10"
-numpy = "2.2.2"
-pandas = "2.2.3"
-matplotlib = "3.10.0"
-torch = "2.6.0"
-torchvision = "0.21.0"
-seaborn = "0.13.2"
-scikit-learn = "1.6.1"
+[dependency-groups]
+dev = [
+    "ipykernel>=6.29.5",
+    "ipywidgets>=8.1.5",
+    "mypy>=1.15.0",
+    "nbdev>=2.3.34",
+    "pre-commit>=4.1.0",
+    "ruff>=0.9.4",
+]
 
-[tool.poetry.group.dev.dependencies]
-ruff = "0.9.5"
-ipykernel = "6.29.5"
-pre-commit = "4.1.0"
-nbdev = "2.3.34"
+[tool.uv.sources]
+torch = [
+  { index = "pytorch-cu124", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+torchvision = [
+  { index = "pytorch-cu124", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
 
-[tool.ruff]
-extend-include = ["*.ipynb"]
-
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
