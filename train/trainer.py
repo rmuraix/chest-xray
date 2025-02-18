@@ -14,6 +14,7 @@ from utils import BaseLogger
 class Trainer:
     """
     Trainer class for training and validating a PyTorch model.
+
     Attributes:
         model (nn.Module): The model to be trained.
         train_loader (DataLoader): DataLoader for the training dataset.
@@ -28,6 +29,8 @@ class Trainer:
         higher_is_better (bool): Whether a higher score is better (e.g., accuracy) or lower (e.g., loss).
         save_dir (str): Directory to save the model checkpoints.
         patience (int): Number of epochs to wait for early stopping.
+        score_function (Optional[Callable[[torch.Tensor, torch.Tensor], float]]): Custom score function.
+            If None, uses accuracy by default.
     """
 
     def __init__(
@@ -74,16 +77,15 @@ class Trainer:
         )
 
         # Early Stopping Parameters
-        self.patience = patience
         self.best_score: float | None = None
         self.epochs_no_improve: int = 0
 
-    def save(self, score: float, epoch: int):
+    def save(self, score: float, epoch: int) -> None:
         """
         Save the model checkpoint with its score and keep only top-k models.
 
         Args:
-            score (float): The evaluation score (e.g., validation loss or accuracy).
+            score (float): The evaluation score (e.g., validation accuracy).
             epoch (int): The epoch number.
         """
         checkpoint_path = os.path.join(
@@ -108,23 +110,23 @@ class Trainer:
         if os.path.exists(worst_path):
             os.remove(worst_path)
             print(
-                f"Removed worst model: {worst_path} with score: {worst_score / self.comparator:.4f}"
+                f"Removed worst model: {worst_path} "
+                f"with score: {worst_score / self.comparator:.4f}"
             )
-
         print(f"Saved model: {checkpoint_path} with score: {score:.4f}")
 
     def compute_accuracy(
         self, outputs: torch.Tensor, targets: torch.Tensor
     ) -> torch.Tensor:
         """
-        Computes the accuracy of the model.
+        Computes the accuracy of the model outputs against the targets.
 
         Args:
             outputs (torch.Tensor): The model predictions.
             targets (torch.Tensor): The true labels.
 
         Returns:
-            torch.Tensor: The accuracy of the model.
+            torch.Tensor: The accuracy of the model (0.0 ~ 1.0).
         """
         return self.accuracy_metric(outputs, targets)
 
@@ -132,11 +134,9 @@ class Trainer:
         """
         Check if early stopping criteria are met based on the provided score.
 
-        This method compares the current score with the best score recorded so far.
-        If the current score is better, it updates the best score and resets the
-        counter for epochs without improvement. If the current score is not better,
-        it increments the counter for epochs without improvement. If the counter
-        reaches the patience threshold, early stopping criteria are met.
+        If the current score is better than the best score recorded so far,
+        update and reset patience counter. Otherwise, increment the counter.
+        If the counter reaches the patience threshold, returns True.
 
         Args:
             score (float): The current score to evaluate.
@@ -144,23 +144,25 @@ class Trainer:
         Returns:
             bool: True if early stopping criteria are met, False otherwise.
         """
-        if (
-            self.best_score is None
-            or score * self.comparator > self.best_score * self.comparator
+        if self.best_score is None or (score * self.comparator) > (
+            self.best_score * self.comparator
         ):
             self.best_score = score
             self.epochs_no_improve = 0
         else:
             self.epochs_no_improve += 1
+
         return self.epochs_no_improve >= self.patience
 
-    def train_on_epoch(self, epoch: int) -> torch.Tensor:
+    def train_on_epoch(self, epoch: int) -> float:
         """
         Trains the model for one epoch.
+
         Args:
             epoch (int): The current epoch number.
+
         Returns:
-            torch.Tensor: The average loss for the epoch.
+            float: The average training loss for the epoch.
         """
         self.model.train()
         self.accuracy_metric.reset()
@@ -182,11 +184,11 @@ class Trainer:
 
                 # Compute the score using the provided function or default to accuracy
                 if self.score_function:
-                    score = self.score_function(outputs, targets)
+                    batch_score = self.score_function(outputs, targets)
                 else:
-                    score = self.accuracy_metric(outputs, targets).item()
+                    batch_score = self.compute_accuracy(outputs, targets).item()
 
-                total_score += score
+                total_score += batch_score
                 num_batches += 1
 
                 t.set_postfix(
@@ -194,7 +196,7 @@ class Trainer:
                 )
 
         avg_loss = running_loss / len(self.train_loader)
-        avg_score = total_score / num_batches
+        avg_score = total_score / num_batches if num_batches > 0 else 0.0
 
         self.logger.log(
             {
@@ -205,7 +207,7 @@ class Trainer:
         )
         return avg_loss
 
-    def validate_on_epoch(self, epoch: int) -> torch.Tensor:
+    def validate_on_epoch(self, epoch: int) -> tuple[float, float | None]:
         """
         Validates the model on the validation dataset for a given epoch.
 
@@ -213,20 +215,17 @@ class Trainer:
             epoch (int): The current epoch number.
 
         Returns:
-            torch.Tensor: The average loss over the validation dataset.
-
-        Notes:
-            - If `self.val_loader` is None, returns 0.0.
-            - Sets the model to evaluation mode.
-            - Uses `torch.no_grad()` to disable gradient computation.
-            - Displays a progress bar with the current loss using `tqdm`.
+            (float, float | None): The average validation loss and the validation score.
+                If val_loader is None, returns (0.0, None).
         """
         if self.val_loader is None:
-            return 0.0
+            return 0.0, None
 
         self.model.eval()
         self.accuracy_metric.reset()
         running_loss = 0.0
+        total_score = 0.0
+        num_batches = 0
 
         with (
             torch.no_grad(),
@@ -235,51 +234,73 @@ class Trainer:
             for i, (inputs, targets) in enumerate(t):
                 inputs, targets = inputs.to(self.device), targets.to(self.device)
                 outputs = self.model(inputs)
+
                 loss = self.criterion(outputs, targets)
                 running_loss += loss.item()
 
-                self.accuracy_metric.update(outputs, targets)
+                if self.score_function:
+                    batch_score = self.score_function(outputs, targets)
+                else:
+                    self.accuracy_metric.update(outputs, targets)
+                    batch_score = self.compute_accuracy(outputs, targets).item()
+
+                total_score += batch_score
+                num_batches += 1
+
                 t.set_postfix(loss=running_loss / (i + 1))
 
         avg_loss = running_loss / len(self.val_loader)
-        val_acc = self.accuracy_metric.compute().item()
-
-        # Compute the score using the provided function or default to accuracy
         if self.score_function:
-            val_score = self.score_function(outputs, targets)
+            # For custom scores, use batch average as score
+            val_score = total_score / num_batches if num_batches > 0 else 0.0
         else:
-            val_score = val_acc  # Default to accuracy
+            # For accuracy, use the metric's compute method
+            val_score = self.accuracy_metric.compute().item()
 
         self.logger.log(
             {
                 "epoch": epoch + 1,
                 "val_loss": avg_loss,
-                "val_accuracy": val_acc,
                 "val_score": val_score,
             }
         )
 
-        self.save(val_score, epoch)
+        return avg_loss, val_score
 
-        if self.check_early_stopping(val_score):
-            print(f"Early stopping triggered at epoch {epoch + 1}")
-            return None
-
-        return avg_loss
-
-    def fit(self):
+    def fit(self) -> None:
         """
-        Trains the model for multiple epochs until early stopping criteria are met.
+        Trains the model for multiple epochs or until early stopping criteria are met.
         """
-        for epoch in range(self.patience):
+        for epoch in range(self.max_epochs):
             self.train_on_epoch(epoch)
-            val_loss = self.validate_on_epoch(epoch)
+            val_loss, val_score = self.validate_on_epoch(epoch)
 
-            self.save(val_loss, epoch)
+            if val_score is not None:
+                # スコアを保存
+                self.save(val_score, epoch)
 
-            if val_loss is None:
-                # Early stopping triggered
-                break
+                if self.check_early_stopping(val_score):
+                    print(f"Early stopping triggered at epoch {epoch + 1}")
+                    break
+
             if epoch + 1 == self.max_epochs:
                 print(f"Reached maximum number of epochs: {self.max_epochs}")
                 break
+
+    def load_best_model(self) -> None:
+        """
+        Loads the best-scored model's state_dict back into self.model.
+        If 'saved_models' is empty, does nothing.
+        """
+        if not self.saved_models:
+            print("No saved model found.")
+            return
+
+        # self.saved_models is a min-heap, so the best model is the last element
+        best = max(self.saved_models, key=lambda x: x[0] * self.comparator)
+        best_model_path = best[1]
+        checkpoint = torch.load(best_model_path, map_location=self.device)
+
+        self.model.load_state_dict(checkpoint["model"])
+        self.optimizer.load_state_dict(checkpoint["optimizer"])
+        print(f"Loaded best model from {best_model_path}")
