@@ -1,3 +1,3 @@
-from .logger import WandbLogger
+from .logger import BaseLogger, WandbLogger
 
-__all__ = ["WandbLogger"]
+__all__ = ["BaseLogger", "WandbLogger"]
