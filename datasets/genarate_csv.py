@@ -51,6 +51,10 @@ def genarate_csv():
         [df_test_filtered[[image_column]], df_test_labels], axis=1
     )
 
+    # remove the "No Finding" column
+    df_train_filtered = df_train_filtered.drop(columns=["No Finding"])
+    df_test_filtered = df_test_filtered.drop(columns=["No Finding"])
+
     df_train_filtered.to_csv(output_train_csv, index=False)
     df_test_filtered.to_csv(output_test_csv, index=False)
 

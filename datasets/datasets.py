@@ -40,12 +40,12 @@ class NihDataset(Dataset):
         return len(self.df)
 
     def __getitem__(self, idx):
-        image_path = self.df.loc[idx, 0]
+        image_path = self.df.loc[idx, "Image Index"]
         image_path = f"{self.image_dir}/{image_path}"
 
         image = decode_image(image_path, mode="RGB")
         label = torch.tensor(
-            self.data.iloc[idx, 1:].values.astype(float), dtype=torch.float32
+            self.df.iloc[idx, 1:].values.astype(float), dtype=torch.float32
         )
 
         return image, image_path, label
