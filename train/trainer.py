@@ -1,12 +1,12 @@
 import heapq
 import os
-from typing import Callable, Optional, Union
+from typing import Literal, Optional, Union
 
 import torch
 import torch.nn as nn
-import torchmetrics
 import tqdm
 from torch.utils.data import DataLoader
+from torchmetrics.classification import Accuracy, F1Score, MultilabelAUROC
 
 from utils import BaseLogger
 
@@ -39,46 +39,48 @@ class Trainer:
         train_loader: DataLoader,
         val_loader: Optional[DataLoader],
         num_classes: int,
+        fold: int,
         criterion: nn.Module,
         max_epochs: int,
         optimizer: torch.optim.Optimizer,
         device: Union[str, torch.device],
         logger: BaseLogger,
-        task: str = "multiclass",
+        log_step: int = 100,
+        task: Literal["binary", "multiclass", "multilabel"] = "multilabel",
         top_k: int = 5,
         save_dir: str = "checkpoints",
-        higher_is_better: bool = False,
+        higher_is_better: bool = True,
         patience: int = 10,
-        score_function: Optional[Callable[[torch.Tensor, torch.Tensor], float]] = None,
     ):
         self.model = model
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.num_classes = num_classes
+        self.fold = fold
         self.max_epochs = max_epochs
         self.task = task
         self.criterion = criterion
         self.optimizer = optimizer
         self.device = device
         self.logger = logger
+        self.log_step = log_step
         self.top_k = top_k
         self.save_dir = save_dir
         self.patience = patience
-        self.score_function = score_function
+
+        self.scaler = torch.amp.GradScaler()
 
         # For saving the models
         self.comparator = 1 if higher_is_better else -1
         self.saved_models: list[tuple[float, str]] = []
         os.makedirs(save_dir, exist_ok=True)
 
-        # Accuracy metric instance created once for performance improvement
-        self.accuracy_metric = torchmetrics.classification.Accuracy(
-            task=task, num_classes=num_classes
-        )
-
         # Early Stopping Parameters
         self.best_score: float | None = None
         self.epochs_no_improve: int = 0
+
+        # For logging
+        self.step: int = 0
 
     def save(self, score: float, epoch: int) -> None:
         """
@@ -89,7 +91,8 @@ class Trainer:
             epoch (int): The epoch number.
         """
         checkpoint_path = os.path.join(
-            self.save_dir, f"model_epoch_{epoch}_score_{score:.4f}.pth"
+            self.save_dir,
+            f"model_fold{self.fold}_epoch{epoch + 1}_score{score:.4f}.pth",
         )
         torch.save(
             {
@@ -114,21 +117,6 @@ class Trainer:
                 f"with score: {worst_score / self.comparator:.4f}"
             )
         print(f"Saved model: {checkpoint_path} with score: {score:.4f}")
-
-    def compute_accuracy(
-        self, outputs: torch.Tensor, targets: torch.Tensor
-    ) -> torch.Tensor:
-        """
-        Computes the accuracy of the model outputs against the targets.
-
-        Args:
-            outputs (torch.Tensor): The model predictions.
-            targets (torch.Tensor): The true labels.
-
-        Returns:
-            torch.Tensor: The accuracy of the model (0.0 ~ 1.0).
-        """
-        return self.accuracy_metric(outputs, targets)
 
     def check_early_stopping(self, score: float) -> bool:
         """
@@ -165,45 +153,64 @@ class Trainer:
             float: The average training loss for the epoch.
         """
         self.model.train()
-        self.accuracy_metric.reset()
+        self.optimizer.train()
+        metric_auroc = MultilabelAUROC(num_labels=self.num_classes, average="macro").to(
+            self.device
+        )
+        metric_acc = Accuracy(
+            task="multilabel", num_labels=self.num_classes, average="macro"
+        ).to(self.device)
+        metric_f1 = F1Score(
+            task="multilabel", num_labels=self.num_classes, average="macro"
+        ).to(self.device)
         running_loss = 0.0
-        total_score = 0.0
-        num_batches = 0
 
         with tqdm.tqdm(self.train_loader, desc=f"[train] Epoch {epoch + 1}") as t:
-            for i, (inputs, targets) in enumerate(t):
+            for i, (inputs, _, targets) in enumerate(t):
                 inputs, targets = inputs.to(self.device), targets.to(self.device)
-                self.optimizer.zero_grad()
+                inputs = inputs.to(torch.float32)
 
                 outputs = self.model(inputs)
                 loss = self.criterion(outputs, targets)
-                loss.backward()
-                self.optimizer.step()
+                self.scaler.scale(loss).backward()
+                self.scaler.step(self.optimizer)
+
+                self.scaler.update()
 
                 running_loss += loss.item()
 
                 # Compute the score using the provided function or default to accuracy
-                if self.score_function:
-                    batch_score = self.score_function(outputs, targets)
-                else:
-                    batch_score = self.compute_accuracy(outputs, targets).item()
+                outputs = torch.sigmoid(outputs)
+                metric_auroc.update(outputs, targets.round().long())
+                metric_acc.update(outputs, targets.round().long())
+                metric_f1.update(outputs, targets.round().long())
 
-                total_score += batch_score
-                num_batches += 1
+                self.step += 1
 
-                t.set_postfix(
-                    loss=running_loss / (i + 1), score=total_score / num_batches
-                )
+                if i % self.log_step == 0:
+                    self.logger.log(
+                        {
+                            "train_loss": running_loss / (i + 1),
+                        },
+                        step=self.step,
+                    )
+
+                t.set_postfix(loss=running_loss / (i + 1))
 
         avg_loss = running_loss / len(self.train_loader)
-        avg_score = total_score / num_batches if num_batches > 0 else 0.0
+        avg_auroc = metric_auroc.compute()
+        avg_acc = metric_acc.compute()
+        avg_f1 = metric_f1.compute()
 
         self.logger.log(
             {
                 "epoch": epoch + 1,
                 "train_loss": avg_loss,
-                "train_score": avg_score,
-            }
+                "train_auc": avg_auroc,
+                "train_acc": avg_acc,
+                "train_f1": avg_f1,
+            },
+            step=self.step,
         )
         return avg_loss
 
@@ -222,50 +229,66 @@ class Trainer:
             return 0.0, None
 
         self.model.eval()
-        self.accuracy_metric.reset()
+        self.optimizer.eval()
+        metric_auroc = MultilabelAUROC(num_labels=self.num_classes, average="macro").to(
+            self.device
+        )
+        metric_acc = Accuracy(
+            task="multilabel", num_labels=self.num_classes, average="macro"
+        ).to(self.device)
+        metric_f1 = F1Score(
+            task="multilabel", num_labels=self.num_classes, average="macro"
+        ).to(self.device)
+
         running_loss = 0.0
-        total_score = 0.0
-        num_batches = 0
 
         with (
             torch.no_grad(),
             tqdm.tqdm(self.val_loader, desc=f"[valid] Epoch {epoch + 1}") as t,
         ):
-            for i, (inputs, targets) in enumerate(t):
+            for i, (inputs, _, targets) in enumerate(t):
                 inputs, targets = inputs.to(self.device), targets.to(self.device)
+                inputs = inputs.to(torch.float32)
                 outputs = self.model(inputs)
 
                 loss = self.criterion(outputs, targets)
                 running_loss += loss.item()
 
-                if self.score_function:
-                    batch_score = self.score_function(outputs, targets)
-                else:
-                    self.accuracy_metric.update(outputs, targets)
-                    batch_score = self.compute_accuracy(outputs, targets).item()
+                # Compute the score using the provided function or default to accuracy
+                outputs = torch.sigmoid(outputs)
+                metric_auroc.update(outputs, targets.round().long())
+                metric_acc.update(outputs, targets.round().long())
+                metric_f1.update(outputs, targets.round().long())
 
-                total_score += batch_score
-                num_batches += 1
+                self.step += 1
+
+                if i % self.log_step == 0:
+                    self.logger.log(
+                        {
+                            "train_loss": running_loss / (i + 1),
+                        },
+                        step=self.step,
+                    )
 
                 t.set_postfix(loss=running_loss / (i + 1))
 
         avg_loss = running_loss / len(self.val_loader)
-        if self.score_function:
-            # For custom scores, use batch average as score
-            val_score = total_score / num_batches if num_batches > 0 else 0.0
-        else:
-            # For accuracy, use the metric's compute method
-            val_score = self.accuracy_metric.compute().item()
+        avg_auc = metric_auroc.compute()
+        avg_acc = metric_acc.compute()
+        avg_f1 = metric_f1.compute()
 
         self.logger.log(
             {
                 "epoch": epoch + 1,
                 "val_loss": avg_loss,
-                "val_score": val_score,
-            }
+                "val_auc": avg_auc,
+                "val_acc": avg_acc,
+                "val_f1": avg_f1,
+            },
+            step=self.step,
         )
 
-        return avg_loss, val_score
+        return avg_loss, avg_auc
 
     def fit(self) -> None:
         """
@@ -276,7 +299,6 @@ class Trainer:
             val_loss, val_score = self.validate_on_epoch(epoch)
 
             if val_score is not None:
-                # スコアを保存
                 self.save(val_score, epoch)
 
                 if self.check_early_stopping(val_score):
