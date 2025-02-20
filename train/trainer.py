@@ -265,7 +265,7 @@ class Trainer:
                 if i % self.log_step == 0:
                     self.logger.log(
                         {
-                            "train_loss": running_loss / (i + 1),
+                            "val_loss": running_loss / (i + 1),
                         },
                         step=self.step,
                     )
