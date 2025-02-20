@@ -32,10 +32,11 @@ def genarate_csv():
     with open(test_file, "r") as f:
         test_filenames = set(f.read().splitlines())
 
-    df = pd.read_csv(csv_file)
-
     image_column = "Image Index"
     label_column = "Finding Labels"
+
+    df = pd.read_csv(csv_file)
+    df = df[df[label_column] != "No Finding"]
 
     # filter out the rows with invalid filenames
     df_train_filtered = df[df[image_column].isin(train_filenames)]
@@ -50,10 +51,6 @@ def genarate_csv():
     df_test_filtered = pd.concat(
         [df_test_filtered[[image_column]], df_test_labels], axis=1
     )
-
-    # remove the "No Finding" column
-    df_train_filtered = df_train_filtered.drop(columns=["No Finding"])
-    df_test_filtered = df_test_filtered.drop(columns=["No Finding"])
 
     df_train_filtered.to_csv(output_train_csv, index=False)
     df_test_filtered.to_csv(output_test_csv, index=False)
