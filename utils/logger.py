@@ -68,3 +68,20 @@ class WandbLogger(BaseLogger):
         See https://docs.wandb.ai/ref/python/finish/
         """
         wandb.finish()
+
+    def watch(self, model, **kwargs):
+        """
+        Watches the model with Weights and Biases (wandb).
+
+        This method watches the model with wandb.watch() to log gradients and parameters.
+
+        See https://docs.wandb.ai/guides/integrations/pytorch
+
+        Args:
+            model (torch.nn.Module): The model to be watched.
+            **kwargs: Additional keyword arguments to be passed to the wandb.watch function.
+
+        Returns:
+            None
+        """
+        wandb.watch(model, **kwargs)

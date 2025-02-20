@@ -1,2 +1,13 @@
+mode: "train"
+device: "cuda:0"
+train:
+  batch_size: 4
+  num_workers: 4
+  epochs: 3
+  lr: 0.0002
+  patience: 10
+  n_splits: 5
+  top_k: 2
+  
 wandb:
   project: "chexnet-tb"
