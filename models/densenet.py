@@ -10,7 +10,7 @@ class DenseNetMultiLabel(nn.Module):
         num_classes (int): Number of output classes.
     """
 
-    def __init__(self, num_classes: int, weights: str = "DEFAULT"):
+    def __init__(self, num_classes: int, weights: str | None = "DEFAULT"):
         super(DenseNetMultiLabel, self).__init__()
         self.densenet = models.densenet121(weights="DEFAULT")
         num_features = self.densenet.classifier.in_features
