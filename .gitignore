@@ -146,3 +146,13 @@ outputs/
 
 # Wandb
 wandb/
+
+# Data
+datasets/data/*
+!datasets/data/**/.keep
+
+# Model
+checkpoints/
+
+# Results
+*.csv
