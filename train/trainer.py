@@ -170,6 +170,8 @@ class Trainer:
                 inputs, targets = inputs.to(self.device), targets.to(self.device)
                 inputs = inputs.to(torch.float32)
 
+                self.optimizer.zero_grad()
+
                 outputs = self.model(inputs)
                 loss = self.criterion(outputs, targets)
                 self.scaler.scale(loss).backward()
