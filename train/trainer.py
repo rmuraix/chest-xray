@@ -5,6 +5,7 @@ from typing import Literal, Optional, Union
 import torch
 import torch.nn as nn
 import tqdm
+from torch.amp import autocast
 from torch.utils.data import DataLoader
 from torchmetrics.classification import Accuracy, F1Score, MultilabelAUROC
 
@@ -171,9 +172,9 @@ class Trainer:
                 inputs = inputs.to(torch.float32)
 
                 self.optimizer.zero_grad()
-
-                outputs = self.model(inputs)
-                loss = self.criterion(outputs, targets)
+                with autocast("cuda", dtype=torch.float16):
+                    outputs = self.model(inputs)
+                    loss = self.criterion(outputs, targets)
                 self.scaler.scale(loss).backward()
                 self.scaler.step(self.optimizer)
 
